@@ -891,7 +891,7 @@ function MonthlyReport({ tasks }) {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button className="btn-ghost" aria-label="Previous year" onClick={() => { setYear((y) => y - 1); setSelectedMonth(`${year - 1}-${today().slice(5, 7)}`) }}>‹</button>
-          <h2 className="text-lg font-extrabold tracking-tight text-cream sm:text-xl">{year} report</h2>
+          <h2 className="text-lg font-extrabold tracking-tight text-cream sm:text-xl">{year} Report</h2>
           <button className="btn-ghost" aria-label="Next year" onClick={() => { setYear((y) => y + 1); setSelectedMonth(`${year + 1}-${today().slice(5, 7)}`) }}>›</button>
         </div>
         <span className="text-xs text-mute">{total} {total === 1 ? 'task' : 'tasks'}</span>
@@ -1009,7 +1009,7 @@ function Readings({ items, onAdd, onUpdate, onRemove }) {
   return (
     <section className="space-y-5">
       <div>
-        <h2 className="text-xl font-bold text-cream sm:text-2xl">Readings and study checklist</h2>
+        <h2 className="text-xl font-bold text-cream sm:text-2xl">Readings and Study Checklist</h2>
         <p className="text-xs text-mute">Track chapters, articles, and study materials</p>
       </div>
 
@@ -1740,7 +1740,7 @@ export default function App() {
       </div>
 
       <footer className="mt-10 border-t border-line pt-5 text-center text-xs text-mute">
-        &copy; {new Date().getFullYear()} Baby Yana&rsquo;s Task Tracker
+        &copy; {new Date().getFullYear()} Baby Yana&rsquo;s Task Tracker | Made by Your Baby Riz
       </footer>
     </main>
   )
