@@ -856,7 +856,8 @@ function MonthlyReport({ tasks }) {
   const months = Array.from({ length: 12 }, (_, i) => {
     const month = String(i + 1).padStart(2, '0')
     const items = tasks.filter((task) => {
-      const date = task.task_date || task.created_at?.slice(0, 10)
+      // Look for task_month (e.g., "2026-01") first!
+      const date = task.task_month || task.task_date || task.created_at?.slice(0, 10)
       return date && date.slice(0, 4) === String(year) && date.slice(5, 7) === month
     })
     const counts = countBy(items)
@@ -1095,20 +1096,36 @@ function Readings({ items, onAdd, onUpdate, onRemove }) {
 /* =========================================================================
    9. POMODORO FOCUS TIMER (keeps running when you switch tabs or close the app)
    ========================================================================= */
+const DEFAULT_DURATIONS = { focus: 25, short: 5 }
 const MODES = {
-  focus: ['Focus', 25],
-  short: ['Short break', 5],
-  long: ['Long break', 15],
+  focus: ['Focus', 'focus'],
+  short: ['Short break', 'short'],
+}
+const FOCUS_KEY = 'yana-focus-timer'
+const FOCUS_DURATIONS_KEY = 'yana-focus-durations'
+
+function readFocusDurations() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FOCUS_DURATIONS_KEY)) || {}
+    return {
+      focus: Number.isFinite(Number(saved.focus)) && Number(saved.focus) >= 1 && Number(saved.focus) <= 180
+        ? Number(saved.focus) : DEFAULT_DURATIONS.focus,
+      short: Number.isFinite(Number(saved.short)) && Number(saved.short) >= 1 && Number(saved.short) <= 60
+        ? Number(saved.short) : DEFAULT_DURATIONS.short,
+    }
+  } catch {
+    return { ...DEFAULT_DURATIONS }
+  }
 }
 
-const FOCUS_KEY = 'yana-focus-timer'
-
 function Focus() {
+  const [durations, setDurations] = useState(readFocusDurations)
   const [init] = useState(() => {
     let s = {}
     try { s = JSON.parse(localStorage.getItem(FOCUS_KEY)) || {} } catch {}
-    const mode = MODES[s.mode] ? s.mode : 'focus'
-    let left = Number.isFinite(s.left) ? s.left : MODES[mode][1] * 60
+    const mode = s.mode === 'short' ? 'short' : 'focus'
+    const savedDurations = readFocusDurations()
+    let left = Number.isFinite(s.left) ? s.left : savedDurations[mode] * 60
     let endAt = s.endAt || null
     let sessions = s.day === today() ? s.sessions || 0 : 0
     if (endAt) {
@@ -1127,10 +1144,9 @@ function Focus() {
   const [endAt, setEndAt] = useState(init.endAt)
   const [sessions, setSessions] = useState(init.sessions)
 
-  const total = MODES[mode][1] * 60
+  const total = durations[mode] * 60
   const mmss = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
 
-  // Save so it survives tab changes / closing the app
   useEffect(() => {
     try {
       localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, left, endAt, sessions, day: today() }))
@@ -1138,11 +1154,15 @@ function Focus() {
   }, [mode, left, endAt, sessions])
 
   useEffect(() => {
+    try { localStorage.setItem(FOCUS_DURATIONS_KEY, JSON.stringify(durations)) } catch {}
+  }, [durations])
+
+  useEffect(() => {
     if (!endAt) return
     const tick = () => {
-      const s = Math.max(0, Math.round((endAt - Date.now()) / 1000))
-      setLeft(s)
-      if (s === 0) {
+      const seconds = Math.max(0, Math.round((endAt - Date.now()) / 1000))
+      setLeft(seconds)
+      if (seconds === 0) {
         setEndAt(null)
         ding()
         setTimeout(ding, 700)
@@ -1163,16 +1183,24 @@ function Focus() {
     return () => { document.title = TITLE }
   }, [mmss, endAt, mode])
 
-  const choose = (m) => {
-    setMode(m)
+  const choose = (nextMode) => {
+    setMode(nextMode)
     setEndAt(null)
-    setLeft(MODES[m][1] * 60)
+    setLeft(durations[nextMode] * 60)
+  }
+
+  const changeDuration = (targetMode, value) => {
+    const max = targetMode === 'focus' ? 180 : 60
+    const parsed = Number(value)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) return
+    setDurations((current) => ({ ...current, [targetMode]: parsed }))
+    if (mode === targetMode && !endAt) setLeft(parsed * 60)
   }
 
   const start = () => {
-    const secs = left > 0 ? left : total
-    setLeft(secs)
-    setEndAt(Date.now() + secs * 1000)
+    const seconds = left > 0 ? left : total
+    setLeft(seconds)
+    setEndAt(Date.now() + seconds * 1000)
   }
   const pause = () => {
     setLeft(Math.max(0, Math.round((endAt - Date.now()) / 1000)))
@@ -1184,13 +1212,13 @@ function Focus() {
 
   return (
     <section className="mx-auto flex max-w-sm flex-col items-center gap-6 py-4">
-      <div className="grid w-full grid-cols-3 gap-2">
-        {Object.entries(MODES).map(([k, [label]]) => (
+      <div className="grid w-full grid-cols-2 gap-2">
+        {Object.entries(MODES).map(([key, [label]]) => (
           <button
-            key={k}
-            onClick={() => choose(k)}
+            key={key}
+            onClick={() => choose(key)}
             className={`min-h-[44px] rounded-xl border px-2 text-xs font-bold transition sm:text-sm ${
-              mode === k ? 'border-accent bg-accent/15 text-cream' : 'border-line text-mute hover:text-cream'
+              mode === key ? 'border-accent bg-accent/15 text-cream' : 'border-line text-mute hover:text-cream'
             }`}
           >
             {label}
@@ -1198,15 +1226,47 @@ function Focus() {
         ))}
       </div>
 
+      <div className="grid w-full grid-cols-2 gap-3">
+        <label className="space-y-1.5 text-xs font-semibold text-silver">
+          <span className="block">Focus minutes</span>
+          <input
+            className="field text-center"
+            type="number"
+            min="1"
+            max="180"
+            step="1"
+            value={durations.focus}
+            disabled={Boolean(endAt)}
+            onChange={(event) => changeDuration('focus', event.target.value)}
+            aria-label="Focus duration in minutes"
+          />
+        </label>
+        <label className="space-y-1.5 text-xs font-semibold text-silver">
+          <span className="block">Break minutes</span>
+          <input
+            className="field text-center"
+            type="number"
+            min="1"
+            max="60"
+            step="1"
+            value={durations.short}
+            disabled={Boolean(endAt)}
+            onChange={(event) => changeDuration('short', event.target.value)}
+            aria-label="Break duration in minutes"
+          />
+        </label>
+      </div>
+      <p className="-mt-4 w-full text-center text-[11px] text-mute">Edit the durations while paused. Your settings are saved on this device.</p>
+
       <div className="relative aspect-square w-full max-w-[15rem]">
         <svg viewBox="0 0 220 220" className="h-full w-full -rotate-90">
-          <circle cx="110" cy="110" r={radius} fill="none" stroke="#1d5334" strokeWidth="12" />
+          <circle cx="110" cy="110" r={radius} fill="none" stroke="#34483b" strokeWidth="12" />
           <circle
             cx="110"
             cy="110"
             r={radius}
             fill="none"
-            stroke="#ece4b3"
+            stroke="#8fbe9b"
             strokeWidth="12"
             strokeLinecap="round"
             strokeDasharray={circumference}
@@ -1522,7 +1582,7 @@ export default function App() {
           />
         )}
 
-        {view === 'report' && <MonthlyReport tasks={dailyTasks} />}
+        {view === 'report' && <MonthlyReport tasks={tasks} />}
 
         {view === 'readings' && <Readings items={readingsList} onAdd={add} onUpdate={update} onRemove={remove} />}
 
