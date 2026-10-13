@@ -46,23 +46,23 @@ function Report({ tasks, year, setYear, openMonth }) {
         <h2 className="text-xl font-bold">{year} report</h2>
         <button className="btn-ghost" onClick={() => setYear(String(+year + 1))} aria-label="Next year">›</button>
       </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="card flex items-center gap-5 p-5">
-          <Donut c={all} size={120} />
-          <ul className="space-y-1.5 text-sm">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="card flex min-w-0 flex-wrap items-center justify-center gap-5 p-5 sm:justify-start">
+            <Donut c={all} size={110} />
+            <ul className="min-w-[10rem] flex-1 space-y-1.5 text-sm">
             {ORDER.map((s) => <li key={s} className="flex items-center gap-2"><Dot s={s} />{LABEL[s]}<b className="ml-auto pl-4">{all[s]}</b></li>)}
-            <li className="border-t border-line pt-1.5 text-slate-400">{total} tasks in {year}</li>
+            <li className="border-t border-line pt-1.5 text-slate-400">{total} {total === 1 ? 'task' : 'tasks'} in {year}</li>
           </ul>
         </div>
-        <div className="card p-5 lg:col-span-2">
+        <div className="card min-w-0 p-5 lg:col-span-2">
           <p className="mb-3 text-sm font-semibold text-slate-300">Tasks per month</p>
           <div className="flex h-36 items-end gap-1.5 sm:gap-2">
             {data.map((d) => (
-              <div key={d.key} className="flex h-full flex-1 flex-col justify-end text-center">
+              <div key={d.key} className="flex h-full min-w-0 flex-1 flex-col justify-end text-center">
                 <div className="flex flex-col-reverse overflow-hidden rounded-t" title={`${d.m}: ${d.c.todo} to do, ${d.c.doing} doing, ${d.c.done} done`}>
                   {ORDER.map((s) => <div key={s} style={{ height: `${(d.c[s] / max) * 120}px`, background: COLOR[s] }} />)}
                 </div>
-                <span className="mt-1 text-[10px] text-slate-400 sm:text-xs">{d.m}</span>
+                <span className="mt-1 text-[9px] text-slate-400 sm:text-xs">{d.m}</span>
               </div>
             ))}
           </div>
@@ -99,7 +99,7 @@ function TimePicker({ value, onChange }) {
     const hh = (Number(h) % 12) + (a === 'PM' ? 12 : 0)
     onChange(`${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}`)
   }
-  const sel = 'field !w-auto !px-2 !py-1.5'
+  const sel = 'field !px-2 !py-1.5 flex-1 sm:flex-none sm:!w-auto'
   return (
     <div className="flex items-center gap-1">
       <select className={sel} value={h12} onChange={(e) => set(e.target.value, m, ap)} aria-label="Hour">
@@ -137,7 +137,7 @@ function TaskForm({ kind, period, task, onSave, onCancel }) {
     if (!editing) { setTitle(''); setTime(''); setDate(''); setDlDate(''); setDlTime(''); setNotes(''); setShowNotes(false) }
   }
   const lab = 'flex flex-col gap-1 text-xs text-slate-400'
-  const inp = 'field !w-auto !py-1.5'
+  const inp = 'field !py-1.5 sm:!w-auto'
   return (
     <form onSubmit={submit} className={editing ? 'w-full' : 'card p-3 sm:p-4'}>
       <input className="field !bg-ink text-base" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus={editing} aria-label="Task title"
