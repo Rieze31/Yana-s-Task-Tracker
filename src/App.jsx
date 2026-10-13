@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, configured } from './supabase'
 import { exportExcel } from './exportExcel'
-import { ORDER, LABEL, COLOR, MONTHS, today, shiftDate, shiftMonth, monthEnd, fmtLong, fmtMonth, fmtShort, fmtTime, monthKey, countBy } from './lib'
+import { ORDER, LABEL, COLOR, MONTHS, today, shiftDate, shiftMonth, monthEnd, fmtLong, fmtMonth, fmtShort, fmtTime, monthKey, countBy, fmtDeadline, splitDeadline, joinDeadline, isOverdue, ding } from './lib'
 
-const toPatch = (kind, v, period) =>
-  kind === 'daily'
-    ? { title: v.title, status: v.status, task_date: v.date || period, due_time: v.time || null, notes: v.notes || null }
-    : { title: v.title, status: v.status, due_date: v.date || null, notes: v.notes || null }
-
+const toPatch = (kind, v, period) => {
+  const common = { title: v.title, status: v.status, notes: v.notes || null, deadline: joinDeadline(v.dlDate, v.dlTime) }
+  return kind === 'daily'
+    ? { ...common, task_date: v.date || period, due_time: v.time || null }
+    : { ...common, due_date: v.date || null }
+}
 /* ---------- charts ---------- */
 function Donut({ c, size = 96 }) {
   const total = c.todo + c.doing + c.done, r = 40, C = 2 * Math.PI * r
@@ -87,37 +88,80 @@ function Report({ tasks, year, setYear, openMonth }) {
   )
 }
 
+/* ---------- 12-hour time picker (hour : minute AM/PM) ---------- */
+function TimePicker({ value, onChange }) {
+  const [h24, m] = value ? value.split(':').map(Number) : [null, 0]
+  const ap = h24 != null && h24 >= 12 ? 'PM' : 'AM'
+  const h12 = h24 == null ? '' : h24 % 12 || 12
+  const mins = [...new Set([...Array(12).keys()].map((i) => i * 5).concat(m))].sort((a, b) => a - b)
+  const set = (h, mi, a) => {
+    if (h === '') return onChange('')
+    const hh = (Number(h) % 12) + (a === 'PM' ? 12 : 0)
+    onChange(`${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}`)
+  }
+  const sel = 'field !w-auto !px-2 !py-1.5'
+  return (
+    <div className="flex items-center gap-1">
+      <select className={sel} value={h12} onChange={(e) => set(e.target.value, m, ap)} aria-label="Hour">
+        <option value="">--</option>
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span className="text-slate-500">:</span>
+      <select className={sel} value={m} disabled={h12 === ''} onChange={(e) => set(h12, +e.target.value, ap)} aria-label="Minute">
+        {mins.map((x) => <option key={x} value={x}>{String(x).padStart(2, '0')}</option>)}
+      </select>
+      <select className={sel} value={ap} disabled={h12 === ''} onChange={(e) => set(h12, m, e.target.value)} aria-label="AM or PM">
+        <option>AM</option><option>PM</option>
+      </select>
+      {value && <button type="button" onClick={() => onChange('')} aria-label="Clear time" className="px-2 text-slate-400 hover:text-white">✕</button>}
+    </div>
+  )
+}
+
 /* ---------- add / edit form ---------- */
 function TaskForm({ kind, period, task, onSave, onCancel }) {
   const editing = Boolean(task)
+  const [dl0, dl1] = splitDeadline(task?.deadline)
   const [title, setTitle] = useState(task?.title ?? '')
   const [status, setStatus] = useState(task?.status ?? 'todo')
   const [time, setTime] = useState(task?.due_time?.slice(0, 5) ?? '')
   const [date, setDate] = useState(kind === 'daily' ? task?.task_date ?? period : task?.due_date ?? '')
+  const [dlDate, setDlDate] = useState(dl0)
+  const [dlTime, setDlTime] = useState(dl1)
   const [notes, setNotes] = useState(task?.notes ?? '')
   const [showNotes, setShowNotes] = useState(Boolean(task?.notes))
   const submit = (e) => {
     e.preventDefault()
     if (!title.trim()) return
-    onSave({ title: title.trim(), status, time, date, notes: notes.trim() })
-    if (!editing) { setTitle(''); setTime(''); setDate(''); setNotes(''); setShowNotes(false) }
+    onSave({ title: title.trim(), status, time, date, notes: notes.trim(), dlDate, dlTime })
+    if (!editing) { setTitle(''); setTime(''); setDate(''); setDlDate(''); setDlTime(''); setNotes(''); setShowNotes(false) }
   }
   const lab = 'flex flex-col gap-1 text-xs text-slate-400'
+  const inp = 'field !w-auto !py-1.5'
   return (
     <form onSubmit={submit} className={editing ? 'w-full' : 'card p-3 sm:p-4'}>
       <input className="field !bg-ink text-base" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus={editing} aria-label="Task title"
         placeholder={kind === 'daily' ? 'What do you need to do today?' : 'What do you want to get done this month?'} />
-      <div className="mt-3 flex flex-wrap items-end gap-3">
-        {kind === 'daily' && editing && <label className={lab}>Date<input className="field !w-auto !py-1.5" type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>}
-        {kind === 'daily' && <label className={lab}>Time<input className="field !w-auto !py-1.5" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></label>}
-        {kind === 'monthly' && <label className={lab}>Date<input className="field !w-auto !py-1.5" type="date" value={date} min={period + '-01'} max={monthEnd(period)} onChange={(e) => setDate(e.target.value)} /></label>}
-        {editing && <label className={lab}>Status<select className="field !w-auto !py-1.5" value={status} onChange={(e) => setStatus(e.target.value)}>{ORDER.map((s) => <option key={s} value={s}>{LABEL[s]}</option>)}</select></label>}
-        {!showNotes && <button type="button" className="pb-2 text-sm font-semibold text-accent" onClick={() => setShowNotes(true)}>+ Add notes</button>}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {kind === 'daily' && editing && <label className={lab}>Date<input className={inp} type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>}
+        {kind === 'daily' && <div className={lab}>Time<TimePicker value={time} onChange={setTime} /></div>}
+        {kind === 'monthly' && <label className={lab}>Date<input className={inp} type="date" value={date} min={period + '-01'} max={monthEnd(period)} onChange={(e) => setDate(e.target.value)} /></label>}
+        {editing && <label className={lab}>Status<select className={inp} value={status} onChange={(e) => setStatus(e.target.value)}>{ORDER.map((s) => <option key={s} value={s}>{LABEL[s]}</option>)}</select></label>}
+        <div className={`${lab} sm:col-span-2`}>
+          Deadline (optional)
+          <div className="flex flex-wrap items-center gap-2">
+            <input className={inp} type="date" value={dlDate} onChange={(e) => setDlDate(e.target.value)} aria-label="Deadline date" />
+            <TimePicker value={dlTime} onChange={setDlTime} />
+          </div>
+        </div>
+      </div>
+      {showNotes && <textarea className="field mt-3" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" aria-label="Notes" />}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {!showNotes && <button type="button" className="py-2 text-sm font-semibold text-accent" onClick={() => setShowNotes(true)}>+ Add notes</button>}
         <span className="flex-1" />
         {editing && <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>}
         <button type="submit" className="btn-primary">{editing ? 'Save changes' : 'Add task'}</button>
       </div>
-      {showNotes && <textarea className="field mt-3" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" aria-label="Notes" />}
     </form>
   )
 }
@@ -126,8 +170,7 @@ function TaskForm({ kind, period, task, onSave, onCancel }) {
 function TaskItem({ task, kind, period, board, showDate, onUpdate, onRemove }) {
   const [editing, setEditing] = useState(false)
   const done = task.status === 'done'
-  const when = kind === 'daily' ? task.task_date : task.due_date
-  const overdue = !done && when && when < today()
+  const overdue = isOverdue(task)
   const next = ORDER[(ORDER.indexOf(task.status) + 1) % 3]
   const meta = [
     kind === 'daily' && showDate && fmtShort(task.task_date),
@@ -144,50 +187,60 @@ function TaskItem({ task, kind, period, board, showDate, onUpdate, onRemove }) {
       </li>
     )
   }
+  const btn = 'rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-raised'
   const actions = (
     <>
-      <button className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-raised hover:text-white" onClick={() => setEditing(true)}>Edit</button>
-      <button className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-raised hover:text-red-400" onClick={() => window.confirm('Delete this task?') && onRemove(task.id)}>Delete</button>
+      <button className={btn} onClick={() => setEditing(true)}>Edit</button>
+      <button className={`${btn} hover:!text-red-400`} onClick={() => window.confirm('Delete this task?') && onRemove(task.id)}>Delete</button>
     </>
   )
   const info = (
-    <div className="min-w-0 flex-1">
+    <div className="min-w-0">
       <p className={`break-words font-semibold ${done ? 'text-slate-500 line-through' : ''}`}>{task.title}</p>
-      {(meta.length > 0 || overdue) && (
-        <p className="flex gap-3 text-xs text-slate-400">{meta.map((m) => <span key={m}>{m}</span>)}{overdue && <span className="font-semibold text-red-400">Overdue</span>}</p>
+      {(meta.length > 0 || task.deadline || overdue) && (
+        <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-slate-400">
+          {meta.map((m) => <span key={m}>{m}</span>)}
+          {task.deadline && <span className={overdue ? 'text-red-400' : 'text-amber-300'}>Due {fmtDeadline(task.deadline)}</span>}
+          {overdue && <span className="font-semibold text-red-400">Overdue</span>}
+        </p>
       )}
-      {task.notes && <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-400">{task.notes}</p>}
+      {task.notes && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-400">{task.notes}</p>}
     </div>
   )
 
   if (board) {
     return (
       <li draggable onDragStart={(e) => e.dataTransfer.setData('id', task.id)} className="card cursor-grab p-3 active:cursor-grabbing">
-        <div className="flex items-start gap-2">{info}<div className="-mr-1 -mt-1 flex shrink-0">{actions}</div></div>
-        <div className="mt-3 grid grid-cols-3 gap-1">
+        {info}
+        <div className="mt-3 grid grid-cols-3 gap-1.5">
           {ORDER.map((s) => (
             <button key={s} onClick={() => onUpdate(task.id, { status: s })} aria-pressed={task.status === s}
-              className="rounded-md border py-1 text-xs font-semibold transition"
+              className="rounded-lg border py-2 text-xs font-semibold transition"
               style={task.status === s ? { background: COLOR[s], borderColor: COLOR[s], color: '#0f1218' } : { borderColor: '#2a3040', color: '#8b93a5' }}>
               {LABEL[s]}
             </button>
           ))}
         </div>
+        <div className="mt-2 flex justify-end gap-1">{actions}</div>
       </li>
     )
   }
   return (
-    <li className={`card flex flex-wrap items-start gap-x-3 gap-y-2 py-3 pl-3 pr-2 sm:flex-nowrap ${done ? 'opacity-80' : ''}`}>
-      <button aria-label={done ? 'Mark as to do' : 'Mark as done'} onClick={() => onUpdate(task.id, { status: done ? 'todo' : 'done' })}
-        className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg border-2 text-sm font-extrabold text-black ${done ? 'border-emerald-400 bg-emerald-400' : 'border-line hover:border-emerald-400'}`}>{done ? '✓' : ''}</button>
-      {info}
-      <button title={`Change to ${LABEL[next]}`} onClick={() => onUpdate(task.id, { status: next })}
-        className="shrink-0 rounded-full border px-3 py-0.5 text-xs font-semibold" style={{ color: COLOR[task.status], borderColor: COLOR[task.status] }}>{LABEL[task.status]}</button>
-      <div className="flex shrink-0">{actions}</div>
+    <li className={`card p-3 ${done ? 'opacity-80' : ''}`}>
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+        <button aria-label={done ? 'Mark as to do' : 'Mark as done'} onClick={() => onUpdate(task.id, { status: done ? 'todo' : 'done' })}
+          className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg border-2 text-sm font-extrabold text-black ${done ? 'border-emerald-400 bg-emerald-400' : 'border-line hover:border-emerald-400'}`}>{done ? '✓' : ''}</button>
+        <div className="min-w-0 flex-1 basis-[calc(100%-2.5rem)] sm:basis-0">{info}</div>
+        <div className="flex w-full items-center gap-1 pl-9 sm:w-auto sm:pl-0">
+          <button title={`Change to ${LABEL[next]}`} onClick={() => onUpdate(task.id, { status: next })}
+            className="rounded-full border px-3.5 py-1.5 text-xs font-semibold" style={{ color: COLOR[task.status], borderColor: COLOR[task.status] }}>{LABEL[task.status]}</button>
+          <span className="flex-1 sm:hidden" />
+          {actions}
+        </div>
+      </div>
     </li>
   )
 }
-
 /* ---------- app ---------- */
 export default function App() {
   const [tasks, setTasks] = useState([])
@@ -202,7 +255,7 @@ export default function App() {
   const [q, setQ] = useState('')
   const [overdueOnly, setOverdueOnly] = useState(false)
   const [busy, setBusy] = useState(false)
-
+  const [now, setNow] = useState(Date.now())
   const load = async () => {
     if (!configured) return setLoading(false)
     const { data, error } = await supabase.from('tasks').select('*').order('created_at')
@@ -210,18 +263,42 @@ export default function App() {
     else { setTasks(data); setError('') }
     setLoading(false)
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+  load()
+  const ch = configured && supabase.channel('tasks-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (p) => {
+      setTasks((list) => {
+        if (p.eventType === 'DELETE') return list.filter((t) => t.id !== p.old.id)
+        return list.some((t) => t.id === p.new.id) ? list.map((t) => (t.id === p.new.id ? p.new : t)) : [...list, p.new]
+      })
+    }).subscribe()
+  let last = today()
+  const tick = () => {
+    setNow(Date.now())
+    const t = today()
+    if (t === last) return
+    setDay((d) => (d === last ? t : d))
+    setMonth((m) => (m === last.slice(0, 7) ? t.slice(0, 7) : m))
+    setYear((y) => (y === last.slice(0, 4) ? t.slice(0, 4) : y))
+    last = t
+  }
+  const onShow = () => { if (!document.hidden) { tick(); load() } }
+  const id = setInterval(tick, 30000)
+  document.addEventListener('visibilitychange', onShow)
+  return () => { clearInterval(id); document.removeEventListener('visibilitychange', onShow); ch && supabase.removeChannel(ch) }
+}, []);
 
   const add = async (row) => {
-    const { data, error } = await supabase.from('tasks').insert(row).select().single()
-    if (error) return setError('Could not add the task. Please try again.')
-    setTasks((t) => [...t, data])
-  }
-  const update = async (id, patch) => {
-    setTasks((t) => t.map((x) => (x.id === id ? { ...x, ...patch } : x)))
-    const { error } = await supabase.from('tasks').update(patch).eq('id', id)
-    if (error) { setError('Could not save that change. Reloading your tasks.'); load() }
-  }
+  const { data, error } = await supabase.from('tasks').insert(row).select().single()
+  if (error) return setError('Could not add the task. Did you run the new SQL for the deadline column?')
+  setTasks((t) => (t.some((x) => x.id === data.id) ? t : [...t, data]))
+}
+const update = async (id, patch) => {
+  if (patch.status === 'done' && tasks.find((x) => x.id === id)?.status !== 'done') ding()
+  setTasks((t) => t.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+  const { error } = await supabase.from('tasks').update(patch).eq('id', id)
+  if (error) { setError('Could not save that change. Reloading your tasks.'); load() }
+}
   const remove = async (id) => {
     setTasks((t) => t.filter((x) => x.id !== id))
     const { error } = await supabase.from('tasks').delete().eq('id', id)
@@ -243,7 +320,7 @@ export default function App() {
     const pool = searching ? tasks.filter((t) => t.type === kind) : inPeriod // searching looks across all dates
     return pool
       .filter((t) => !needle || t.title.toLowerCase().includes(needle) || (t.notes || '').toLowerCase().includes(needle))
-      .filter((t) => !overdueOnly || (t.status !== 'done' && (kind === 'daily' ? t.task_date : t.due_date) < today() && (kind === 'daily' ? t.task_date : t.due_date)))
+      .filter((t) => !overdueOnly || isOverdue(t))
       .sort((a, b) => {
         const k = (t) => (kind === 'daily' ? (searching ? t.task_date : '') + (t.due_time || '~') : (searching ? t.task_month : '') + (t.due_date || '~'))
         return k(a).localeCompare(k(b))
@@ -277,8 +354,10 @@ export default function App() {
   return (
     <main className={`mx-auto px-4 pb-20 pt-6 sm:px-6 sm:pt-8 ${layout === 'board' || view === 'report' ? 'max-w-6xl' : 'max-w-3xl'}`}>
       <header className="mb-5 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Baby Yana's tasks</h1>
-        <button className="btn-ghost" onClick={download} disabled={!tasks.length || busy}>{busy ? 'Preparing…' : 'Download Excel'}</button>
+        <h1 className="min-w-0 text-xl font-bold tracking-tight sm:text-3xl">Baby Yana's tasks</h1>
+        <button className="btn-ghost shrink-0 !px-3" onClick={download} disabled={!tasks.length || busy}>
+          {busy ? 'Preparing…' : <><span className="sm:hidden">Excel</span><span className="hidden sm:inline">Download Excel</span></>}
+        </button>
       </header>
 
       <nav className="mb-6 flex gap-6 border-b border-line" role="tablist">
@@ -291,16 +370,18 @@ export default function App() {
         <Report tasks={tasks} year={year} setYear={setYear} openMonth={(key) => { setMonth(key); setYear(key.slice(0, 4)); setView('monthly') }} />
       ) : (
         <>
-          <section className="mb-4 flex flex-wrap items-center gap-2">
-            <button className="btn-ghost !px-3 text-lg" aria-label="Previous" onClick={() => nav(-1)}>‹</button>
-            <div className="min-w-0 flex-1 basis-48">
-              <h2 className="text-lg font-bold sm:text-xl">{kind === 'daily' ? fmtLong(day) : fmtMonth(month)}</h2>
+          <section className="mb-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <button className="btn-ghost !px-3.5 text-lg" aria-label="Previous" onClick={() => nav(-1)}>‹</button>
+              <h2 className="min-w-0 flex-1 text-center text-base font-bold sm:text-left sm:text-xl">{kind === 'daily' ? fmtLong(day) : fmtMonth(month)}</h2>
+              <button className="btn-ghost !px-3.5 text-lg" aria-label="Next" onClick={() => nav(1)}>›</button>
             </div>
-            {kind === 'daily'
-              ? <input className="field !w-auto" type="date" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} aria-label="Pick a date" />
-              : <input className="field !w-auto" type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Pick a month" />}
-            <button className="btn-ghost !px-3 text-lg" aria-label="Next" onClick={() => nav(1)}>›</button>
-            <button className="btn-ghost" onClick={() => { setDay(today()); setMonth(today().slice(0, 7)) }}>{kind === 'daily' ? 'Today' : 'This month'}</button>
+            <div className="flex gap-2">
+              {kind === 'daily'
+                ? <input className="field flex-1 sm:!w-auto sm:flex-none" type="date" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} aria-label="Pick a date" />
+                : <input className="field flex-1 sm:!w-auto sm:flex-none" type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Pick a month" />}
+              <button className="btn-ghost" onClick={() => { setDay(today()); setMonth(today().slice(0, 7)) }}>{kind === 'daily' ? 'Today' : 'This month'}</button>
+            </div>
           </section>
 
           <TaskForm key={view + period} kind={kind} period={period} onSave={addTask} />
@@ -311,18 +392,20 @@ export default function App() {
             {inPeriod.length > 0 && <span>{periodCounts.done} of {inPeriod.length} done</span>}
           </div>
 
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <input className="field sm:max-w-xs" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search all ${kind} tasks`} aria-label="Search tasks" />
-            <label className="flex items-center gap-2 text-sm text-slate-400"><input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="accent-amber-400" />Overdue only</label>
-            <div className="flex overflow-hidden rounded-lg border border-line text-sm font-semibold sm:ml-auto">
-              {['list', 'board'].map((l) => <button key={l} onClick={() => setLayout(l)} className={`px-4 py-1.5 capitalize ${layout === l ? 'bg-raised text-white' : 'text-slate-400'}`}>{l}</button>)}
+          <div className="mb-4 space-y-3">
+            <input className="field sm:max-w-sm" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search all ${kind} tasks`} aria-label="Search tasks" />
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex items-center gap-2 text-sm text-slate-400"><input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="h-4 w-4 accent-amber-400" />Overdue only</label>
+              <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-line text-sm font-semibold">
+                {['list', 'board'].map((l) => <button key={l} onClick={() => setLayout(l)} className={`px-4 py-1.5 capitalize ${layout === l ? 'bg-raised text-white' : 'text-slate-400'}`}>{l}</button>)}
+              </div>
             </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Filter by status">
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap" role="tablist" aria-label="Filter by status">
             {['all', ...ORDER].map((s) => (
               <button key={s} role="tab" aria-selected={filter === s} onClick={() => setFilter(s)}
-                className={`flex items-center gap-2 rounded-full border px-3.5 py-1 text-sm font-semibold transition ${filter === s ? 'border-accent bg-accent/10 text-white' : 'border-line text-slate-400 hover:text-white'}`}>
+                className={`flex items-center justify-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition ${filter === s ? 'border-accent bg-accent/10 text-white' : 'border-line text-slate-400 hover:text-white'}`}>
                 {s !== 'all' && <Dot s={s} />}{s === 'all' ? 'All' : LABEL[s]}
                 <span className="text-xs text-slate-500">{s === 'all' ? base.length : counts[s]}</span>
               </button>
