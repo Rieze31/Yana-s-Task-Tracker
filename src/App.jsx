@@ -847,8 +847,142 @@ function CalendarView({ tasks, subsOf, onSelectDate }) {
   )
 }
 
+
 /* =========================================================================
-   7. READINGS
+   7. MONTHLY REPORT
+   ========================================================================= */
+function MonthlyReport({ tasks }) {
+  const [year, setYear] = useState(Number(today().slice(0, 4)))
+  const months = Array.from({ length: 12 }, (_, i) => {
+    const month = String(i + 1).padStart(2, '0')
+    const items = tasks.filter((task) => {
+      const date = task.task_date || task.created_at?.slice(0, 10)
+      return date && date.slice(0, 4) === String(year) && date.slice(5, 7) === month
+    })
+    const counts = countBy(items)
+    const total = items.length
+    return {
+      key: `${year}-${month}`,
+      name: new Date(year, i, 1).toLocaleDateString('en-US', { month: 'long' }),
+      short: new Date(year, i, 1).toLocaleDateString('en-US', { month: 'short' }),
+      items,
+      total,
+      todo: counts.todo || 0,
+      doing: counts.doing || 0,
+      done: counts.done || 0,
+      pct: total ? Math.round(((counts.done || 0) / total) * 100) : 0,
+    }
+  })
+  const all = months.flatMap((m) => m.items)
+  const totals = countBy(all)
+  const total = all.length
+  const pct = total ? Math.round(((totals.done || 0) / total) * 100) : 0
+  const maxMonth = Math.max(1, ...months.map((m) => m.total))
+  const [selectedMonth, setSelectedMonth] = useState(today().slice(0, 7))
+  const selected = months.find((m) => m.key === selectedMonth) || months[Math.max(0, Number(today().slice(5, 7)) - 1)]
+
+  const ring = (percent, color = '#35e69a') => ({
+    background: `conic-gradient(${color} ${percent * 3.6}deg, #294354 ${percent * 3.6}deg 360deg)`,
+  })
+
+  return (
+    <section className="space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button className="btn-ghost" aria-label="Previous year" onClick={() => { setYear((y) => y - 1); setSelectedMonth(`${year - 1}-${today().slice(5, 7)}`) }}>‹</button>
+          <h2 className="text-lg font-extrabold tracking-tight text-cream sm:text-xl">{year} report</h2>
+          <button className="btn-ghost" aria-label="Next year" onClick={() => { setYear((y) => y + 1); setSelectedMonth(`${year + 1}-${today().slice(5, 7)}`) }}>›</button>
+        </div>
+        <span className="text-xs text-mute">{total} {total === 1 ? 'task' : 'tasks'}</span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.75fr)]">
+        <div className="card flex min-h-52 items-center gap-5 p-4 sm:p-5">
+          <div className="grid h-24 w-24 shrink-0 place-items-center rounded-full p-2 sm:h-28 sm:w-28" style={ring(pct)}>
+            <div className="grid h-full w-full place-items-center rounded-full bg-surface text-lg font-extrabold text-cream">{pct}%</div>
+          </div>
+          <div className="min-w-0 flex-1 space-y-2 text-sm">
+            {[['To do', totals.todo || 0, '#91a9b8'], ['Doing', totals.doing || 0, '#27b9e9'], ['Done', totals.done || 0, '#35e69a']].map(([label, value, color]) => (
+              <div key={label} className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full" style={{ background: color }} />
+                <span className="flex-1 text-silver">{label}</span>
+                <strong className="text-cream">{value}</strong>
+              </div>
+            ))}
+            <p className="border-t border-line pt-2 text-xs text-mute">{total} tasks in {year}</p>
+          </div>
+        </div>
+
+        <div className="card min-w-0 p-4 sm:p-5">
+          <h3 className="mb-4 text-sm font-bold text-cream">Tasks per month</h3>
+          <div className="flex h-40 items-end gap-1.5 sm:gap-2.5">
+            {months.map((m) => (
+              <button key={m.key} title={`${m.name} ${year}: ${m.total} tasks`} onClick={() => setSelectedMonth(m.key)} className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
+                <div className="flex h-full w-full items-end overflow-hidden rounded-t-md">
+                  <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-md" style={{ height: `${m.total ? Math.max(5, (m.total / maxMonth) * 100) : 0}%` }}>
+                    {m.todo + m.doing > 0 && <div style={{ height: `${((m.todo + m.doing) / Math.max(1, m.total)) * 100}%`, background: '#8ba5b5' }} />}
+                    {m.done > 0 && <div style={{ height: `${(m.done / Math.max(1, m.total)) * 100}%`, background: '#35e69a' }} />}
+                  </div>
+                </div>
+                <span className={`text-[10px] sm:text-xs ${selectedMonth === m.key ? 'font-extrabold text-accent' : 'text-mute group-hover:text-cream'}`}>{m.short}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {months.map((m) => (
+          <button key={m.key} onClick={() => setSelectedMonth(m.key)} className={`card flex min-w-0 items-center gap-3 p-3 text-left transition sm:p-4 ${selectedMonth === m.key ? 'border-gold ring-1 ring-gold/60' : 'hover:border-line'}`}>
+            <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full p-1.5 sm:h-16 sm:w-16" style={ring(m.pct, m.total ? '#35e69a' : '#294354')}>
+              <div className="grid h-full w-full place-items-center rounded-full bg-surface text-xs font-extrabold text-cream">{m.pct}%</div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="truncate text-sm font-extrabold text-cream">{m.name} {year}</h3>
+              {m.total ? (
+                <div className="mt-1 space-y-0.5 text-xs">
+                  {[['To do', m.todo, '#91a9b8'], ['Doing', m.doing, '#27b9e9'], ['Done', m.done, '#35e69a']].map(([label, value, color]) => (
+                    <div key={label} className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+                      <span className="flex-1 text-silver">{label}</span>
+                      <strong className="text-cream">{value}</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="mt-1 text-xs text-mute">No tasks</p>}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="card p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+          <div>
+            <h3 className="font-extrabold text-cream">{selected.name} {year}</h3>
+            <p className="text-xs text-mute">{selected.total} {selected.total === 1 ? 'task' : 'tasks'} · {selected.pct}% completed</p>
+          </div>
+          <div className="h-2 w-28 overflow-hidden rounded-full bg-raised">
+            <div className="h-full rounded-full bg-accent" style={{ width: `${selected.pct}%` }} />
+          </div>
+        </div>
+        {selected.items.length ? (
+          <div className="space-y-2">
+            {selected.items.slice().sort((a, b) => (a.task_date || '').localeCompare(b.task_date || '')).map((task) => (
+              <div key={task.id} className="flex items-start gap-3 rounded-xl border border-line/70 bg-ink/40 p-3">
+                <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: task.status === 'done' ? '#35e69a' : task.status === 'doing' ? '#27b9e9' : '#91a9b8' }} />
+                <span className={`min-w-0 flex-1 break-words text-sm ${task.status === 'done' ? 'text-mute line-through' : 'text-cream'}`}>{task.title}</span>
+                <span className="shrink-0 text-xs text-mute">{task.task_date ? fmtShort(task.task_date) : 'No date'}</span>
+              </div>
+            ))}
+          </div>
+        ) : <p className="py-6 text-center text-sm text-mute">No tasks recorded for this month.</p>}
+      </div>
+    </section>
+  )
+}
+
+/* =========================================================================
+   8. READINGS
    ========================================================================= */
 function Readings({ items, onAdd, onUpdate, onRemove }) {
   const [title, setTitle] = useState('')
@@ -959,7 +1093,7 @@ function Readings({ items, onAdd, onUpdate, onRemove }) {
 }
 
 /* =========================================================================
-   8. POMODORO FOCUS TIMER (keeps running when you switch tabs or close the app)
+   9. POMODORO FOCUS TIMER (keeps running when you switch tabs or close the app)
    ========================================================================= */
 const MODES = {
   focus: ['Focus', 25],
@@ -1103,7 +1237,7 @@ function Focus() {
 }
 
 /* =========================================================================
-   9. MAIN APP
+   10. MAIN APP
    ========================================================================= */
 export default function App() {
   const [tasks, setTasks] = useState(() => {
@@ -1348,10 +1482,11 @@ export default function App() {
         </div>
       </header>
 
-      <nav className="mb-5 grid grid-cols-4 border-b border-line" role="tablist">
+      <nav className="mb-5 grid grid-cols-5 border-b border-line" role="tablist">
         {[
           ['daily', 'Planner'],
           ['calendar', 'Calendar'],
+          ['report', 'Report'],
           ['readings', 'Readings'],
           ['focus', 'Pomodoro'],
         ].map(([v, label]) => (
@@ -1386,6 +1521,8 @@ export default function App() {
             }}
           />
         )}
+
+        {view === 'report' && <MonthlyReport tasks={dailyTasks} />}
 
         {view === 'readings' && <Readings items={readingsList} onAdd={add} onUpdate={update} onRemove={remove} />}
 

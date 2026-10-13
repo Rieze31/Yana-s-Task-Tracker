@@ -1,3 +1,4 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,46 +6,68 @@
 @layer base {
   body {
     @apply bg-ink text-slate-100 font-sans antialiased;
-    background-color: #0b140f;
+    background-color: #101b17;
   }
-  input, select, textarea {
+
+  input,
+  select,
+  textarea {
     color-scheme: dark;
+  }
+
+  ::selection {
+    background: #8fbe9b;
+    color: #102218;
   }
 }
 
 @layer components {
   .field {
-    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 transition focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/40;
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 transition;
+    @apply focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/40;
   }
+
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-150;
+    @apply disabled:cursor-not-allowed disabled:opacity-40;
   }
+
   .btn-primary {
-    @apply btn bg-accent text-emerald-950 hover:brightness-105 active:scale-[0.98] font-bold shadow-sm;
+    @apply btn bg-accent font-bold text-ink shadow-sm;
+    @apply hover:brightness-105 active:scale-[0.98];
   }
+
   .btn-secondary {
-    @apply btn bg-raised text-slate-200 border border-line hover:border-accent/40 active:scale-[0.98];
+    @apply btn border border-line bg-raised text-slate-200;
+    @apply hover:border-accent/50 hover:bg-line active:scale-[0.98];
   }
+
   .btn-ghost {
-    @apply btn border border-line text-slate-300 hover:bg-raised active:scale-[0.98];
+    @apply btn border border-line text-slate-300;
+    @apply hover:border-line hover:bg-raised hover:text-cream active:scale-[0.98];
   }
+
   .card {
     @apply rounded-2xl border border-line bg-surface shadow-sm;
+    transition: border-color 180ms ease, background-color 180ms ease;
   }
 }
 
-/* Clean aesthetic scrollbar */
+/* Minimal forest-green scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
-  background: #0b140f;
+  background: #101b17;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: #22402e;
+  background: #34483b;
   border-radius: 9999px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: #2f573e;
+  background: #52735c;
 }
