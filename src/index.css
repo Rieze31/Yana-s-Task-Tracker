@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-ink text-slate-100 font-sans antialiased; }
+  input, select, textarea { color-scheme: dark; }
+}
+@layer components {
+  .field { @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none; }
+  .btn { @apply inline-flex items-center justify-center gap-1 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40; }
+  .btn-primary { @apply btn bg-accent text-black hover:brightness-110; }
+  .btn-ghost { @apply btn border border-line hover:bg-raised; }
+  .card { @apply rounded-xl border border-line bg-surface; }
+}
