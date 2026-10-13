@@ -99,9 +99,9 @@ function TimePicker({ value, onChange }) {
     const hh = (Number(h) % 12) + (a === 'PM' ? 12 : 0)
     onChange(`${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}`)
   }
-  const sel = 'field !px-2 !py-1.5 flex-1 sm:flex-none sm:!w-auto'
+  const sel = 'field min-w-0 !px-2 !py-1.5 flex-1 sm:flex-none sm:!w-auto'
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex w-full min-w-0 items-center gap-1 sm:w-auto">
       <select className={sel} value={h12} onChange={(e) => set(e.target.value, m, ap)} aria-label="Hour">
         <option value="">--</option>
         {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}
