@@ -1,12 +1,10 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    @apply bg-ink text-slate-100 font-sans antialiased;
-    background-color: #101b17;
+    @apply bg-bg text-cream font-sans antialiased;
   }
 
   input,
@@ -16,14 +14,14 @@
   }
 
   ::selection {
-    background: #8fbe9b;
-    color: #102218;
+    background: #c9b458;
+    color: #0d0d0d;
   }
 }
 
 @layer components {
   .field {
-    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 transition;
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-cream placeholder-mute transition;
     @apply focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/40;
   }
 
@@ -38,12 +36,12 @@
   }
 
   .btn-secondary {
-    @apply btn border border-line bg-raised text-slate-200;
+    @apply btn border border-line bg-raised text-silver;
     @apply hover:border-accent/50 hover:bg-line active:scale-[0.98];
   }
 
   .btn-ghost {
-    @apply btn border border-line text-slate-300;
+    @apply btn border border-line text-silver;
     @apply hover:border-line hover:bg-raised hover:text-cream active:scale-[0.98];
   }
 
@@ -53,21 +51,21 @@
   }
 }
 
-/* Minimal forest-green scrollbar */
+/* Minimal neutral scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #101b17;
+  background: #121212;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #34483b;
+  background: #2e2e2e;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52735c;
+  background: #4a4a4a;
 }

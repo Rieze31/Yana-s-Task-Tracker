@@ -14,7 +14,7 @@ const TITLE = "Baby Yana's Task Tracker"
 
 /* Palette taken from the PLM Student Commission on Audit seal:
    deep green, cream, antique gold, silver. */
-const STATUS_HEX = ['#c4c8c0', '#c9b458', '#ece4b3'] // order: first, middle, last status
+const STATUS_HEX = ['#c4c4c4', '#c9b458', '#ededed'] // order: first, middle, last status
 const sc = (s) => STATUS_HEX[Math.max(0, ORDER.indexOf(s))]
 const DANGER = '#e0806f'
 
@@ -557,8 +557,8 @@ function TaskDetail({ task, subs, onBack, onUpdate, onRemove, onAddSub }) {
                   className="min-h-[42px] rounded-lg border px-1 text-xs font-bold transition"
                   style={
                     task.status === s
-                      ? { background: sc(s), borderColor: sc(s), color: '#061a10' }
-                      : { borderColor: '#1d5334', color: '#8da596' }
+                      ? { background: sc(s), borderColor: sc(s), color: '#0d0d0d' }
+                      : { borderColor: '#2e2e2e', color: '#8a8a8a' }
                   }
                 >
                   {LABEL[s]}
@@ -894,8 +894,8 @@ function MonthlyReport({ tasks }) {
   const [selectedMonth, setSelectedMonth] = useState(today().slice(0, 7))
   const selected = months.find((m) => m.key === selectedMonth) || months[Math.max(0, Number(today().slice(5, 7)) - 1)]
 
-  const ring = (percent, color = '#35e69a') => ({
-    background: `conic-gradient(${color} ${percent * 3.6}deg, #294354 ${percent * 3.6}deg 360deg)`,
+  const ring = (percent, color = '#e8e8e8') => ({
+    background: `conic-gradient(${color} ${percent * 3.6}deg, #2e2e2e ${percent * 3.6}deg 360deg)`,
   })
 
   return (
@@ -915,7 +915,7 @@ function MonthlyReport({ tasks }) {
             <div className="grid h-full w-full place-items-center rounded-full bg-surface text-lg font-extrabold text-cream">{pct}%</div>
           </div>
           <div className="min-w-0 flex-1 space-y-2 text-sm">
-            {[['To do', totals.todo || 0, '#91a9b8'], ['Doing', totals.doing || 0, '#27b9e9'], ['Done', totals.done || 0, '#35e69a']].map(([label, value, color]) => (
+            {[['To do', totals.todo || 0, '#8a8a8a'], ['Doing', totals.doing || 0, '#c9b458'], ['Done', totals.done || 0, '#35e69a']].map(([label, value, color]) => (
               <div key={label} className="flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full" style={{ background: color }} />
                 <span className="flex-1 text-silver">{label}</span>
@@ -933,7 +933,7 @@ function MonthlyReport({ tasks }) {
               <button key={m.key} title={`${m.name} ${year}: ${m.total} tasks`} onClick={() => setSelectedMonth(m.key)} className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
                 <div className="flex h-full w-full items-end overflow-hidden rounded-t-md">
                   <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-md" style={{ height: `${m.total ? Math.max(5, (m.total / maxMonth) * 100) : 0}%` }}>
-                    {m.todo + m.doing > 0 && <div style={{ height: `${((m.todo + m.doing) / Math.max(1, m.total)) * 100}%`, background: '#8ba5b5' }} />}
+                    {m.todo + m.doing > 0 && <div style={{ height: `${((m.todo + m.doing) / Math.max(1, m.total)) * 100}%`, background: '#4a4a4a' }} />}
                     {m.done > 0 && <div style={{ height: `${(m.done / Math.max(1, m.total)) * 100}%`, background: '#35e69a' }} />}
                   </div>
                 </div>
@@ -1373,13 +1373,13 @@ function Focus() {
 
       <div className="relative aspect-square w-full max-w-[15rem]">
         <svg viewBox="0 0 220 220" className="h-full w-full -rotate-90">
-          <circle cx="110" cy="110" r={radius} fill="none" stroke="#34483b" strokeWidth="12" />
+          <circle cx="110" cy="110" r={radius} fill="none" stroke="#2e2e2e" strokeWidth="12" />
           <circle
             cx="110"
             cy="110"
             r={radius}
             fill="none"
-            stroke="#8fbe9b"
+            stroke="#e8e8e8"
             strokeWidth="12"
             strokeLinecap="round"
             strokeDasharray={circumference}
@@ -1890,7 +1890,7 @@ export default function App() {
                     type="checkbox"
                     checked={overdueOnly}
                     onChange={(e) => setOverdueOnly(e.target.checked)}
-                    className="h-4 w-4 accent-[#ece4b3]"
+                    className="h-4 w-4 accent-[#e8e8e8]"
                   />
                   Overdue only
                 </label>
