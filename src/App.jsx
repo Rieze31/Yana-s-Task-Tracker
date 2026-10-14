@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, configured } from './supabase'
 import { exportExcel } from './exportExcel'
 import { VERSES, QUOTES } from './content'
@@ -48,6 +48,14 @@ const SORTS = {
 
 const dueDate = (t) => (t.deadline ? splitDeadline(t.deadline)[0] : '')
 const dueClock = (t) => (t.deadline ? splitDeadline(t.deadline)[1] : '')
+
+/* Same rules as the mobile app: a task stays visible from its scheduled date through its due date */
+const effDate = (t) => dueDate(t) || t.task_date || ''
+const showsOn = (t, day) => {
+  if (!t.task_date) return false
+  const end = effDate(t) > t.task_date ? effDate(t) : t.task_date
+  return t.task_date <= day && day <= end
+}
 
 const Dot = ({ s }) => (
   <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: sc(s) }} />
@@ -214,88 +222,6 @@ function TimePicker({ value, onChange }) {
           className="shrink-0 px-1.5 py-2 text-xs font-semibold text-mute hover:text-cream"
         >
           Clear
-        </button>
-      )}
-    </div>
-  )
-}
-
-/* =========================================================================
-   3. SUB-TASKS (shown inside every task, like the reference screenshot)
-   ========================================================================= */
-function Subtasks({ parent, subs, onUpdate, onRemove, onAdd }) {
-  const [open, setOpen] = useState(false)
-  const [text, setText] = useState('')
-  const done = subs.filter((s) => s.status === 'done').length
-  const pct = subs.length ? Math.round((done / subs.length) * 100) : 0
-
-  const submit = (e) => {
-    e.preventDefault()
-    const t = text.trim()
-    if (!t) return
-    onAdd(parent, t)
-    setText('')
-  }
-
-  return (
-    <div className="mt-3">
-      {subs.length > 0 && (
-        <>
-          <div className="mb-1.5 flex items-center justify-between text-xs text-silver">
-            <span>Sub-tasks</span>
-            <span className="font-bold text-accent">{done} of {subs.length}</span>
-          </div>
-          <ProgressBar pct={pct} />
-          <ul className="mt-2 divide-y divide-line/60">
-            {subs.map((s) => {
-              const sDone = s.status === 'done'
-              return (
-                <li key={s.id} className="flex items-center gap-3 py-2.5">
-                  <Check
-                    size="h-5 w-5"
-                    on={sDone}
-                    label={sDone ? 'Mark sub-task as to do' : 'Mark sub-task as done'}
-                    onClick={() => onUpdate(s.id, { status: sDone ? 'todo' : 'done' })}
-                  />
-                  <span className={`min-w-0 flex-1 break-words text-sm ${sDone ? 'text-mute line-through' : 'text-cream'}`}>
-                    {s.title}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onRemove(s.id)}
-                    className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-mute transition hover:text-danger"
-                  >
-                    Remove
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      )}
-
-      {open ? (
-        <form onSubmit={submit} className="mt-2 flex gap-2">
-          <input
-            className="field min-w-0 flex-1"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Sub-task name"
-            aria-label="Sub-task name"
-            autoFocus
-          />
-          <button type="submit" className="btn-secondary shrink-0">Add</button>
-          <button type="button" className="btn-ghost shrink-0" onClick={() => { setOpen(false); setText('') }}>
-            Done
-          </button>
-        </form>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="mt-1 py-2 text-sm font-semibold text-accent hover:underline"
-        >
-          + Add sub-task
         </button>
       )}
     </div>
@@ -481,140 +407,226 @@ function TaskForm({ period, task, onSave, onCancel }) {
 }
 
 /* =========================================================================
-   5. TASK ITEM
+   5. TASK ROW (compact, click to open) + TASK DETAIL PAGE (sub-tasks live here)
    ========================================================================= */
-function TaskItem({ task, subs, period, board, showDate, onUpdate, onRemove, onAddSubtask }) {
-  const [editing, setEditing] = useState(false)
+const PRI_TEXT = { high: 'text-danger', medium: 'text-gold', low: 'text-silver' }
+
+function TaskRow({ task, subs, showDate, board, onOpen, onUpdate }) {
   const done = task.status === 'done'
-  const overdue = isOverdue(task)
-  const isHigh = task.priority === 'high'
+  const overdue = isOverdue(task) && !done
   const pri = PRI[task.priority || 'medium']
-  const next = ORDER[(ORDER.indexOf(task.status) + 1) % 3]
-  const meta = [showDate && fmtShort(task.task_date), task.due_time && fmtTime(task.due_time)].filter(Boolean)
+  const subDone = subs.filter((s) => s.status === 'done').length
+  const redOrSilver = overdue ? 'text-danger' : 'text-silver'
 
-  if (editing) {
-    return (
-      <li className="card p-3.5 sm:p-4">
-        <TaskForm
-          period={period}
-          task={task}
-          onCancel={() => setEditing(false)}
-          onSave={(patch) => {
-            onUpdate(task.id, patch)
-            setEditing(false)
-          }}
-        />
-      </li>
-    )
-  }
+  const bits = []
+  if (showDate && task.task_date) bits.push({ t: fmtShort(task.task_date), cls: redOrSilver })
+  if (task.due_time) bits.push({ t: fmtTime(task.due_time), cls: redOrSilver })
+  if (task.deadline) bits.push({ t: `Due ${fmtDeadline(task.deadline)}`, cls: overdue ? 'text-danger' : 'text-gold' })
+  else if (overdue) bits.push({ t: 'Overdue', cls: 'text-danger' })
+  if (subs.length) bits.push({ t: `${subDone}/${subs.length} sub-tasks`, cls: 'text-silver' })
+  if (task.status === 'doing') bits.push({ t: 'Doing', style: { color: sc('doing') } })
 
-  const btnCls = 'min-h-[40px] rounded-lg px-3 text-xs font-semibold text-silver transition hover:bg-raised sm:min-h-0 sm:py-1.5'
-  const actions = (
-    <div className="flex items-center gap-1">
-      <button className={btnCls} onClick={() => setEditing(true)}>Edit</button>
-      <button
-        className={`${btnCls} hover:!text-danger`}
-        onClick={() => window.confirm('Delete this task and its sub-tasks?') && onRemove(task.id)}
-      >
-        Delete
-      </button>
-    </div>
-  )
+  const cardBorder = task.priority === 'high' && !done ? 'bg-danger/5' : 'border-line bg-surface'
 
-  const cardBorder = isHigh && !done ? 'bg-danger/5' : 'border-line bg-surface'
-
-  const info = (
-    <div className="min-w-0">
-      <p className={`break-words text-base font-semibold ${done ? 'text-mute line-through' : 'text-cream'}`}>
-        {task.title}
-      </p>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
-        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${pri.cls}`}>{pri.label}</span>
-        {meta.map((m) => (
-          <span key={m} className="font-medium text-silver">{m}</span>
-        ))}
+  return (
+    <li
+      role="button"
+      tabIndex={0}
+      draggable={board}
+      onDragStart={board ? (e) => e.dataTransfer.setData('id', task.id) : undefined}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      style={redBorder(task)}
+      className={`card flex cursor-pointer items-center gap-3 p-3.5 transition hover:border-accent ${cardBorder} ${done ? 'opacity-70' : ''}`}
+    >
+      <Check
+        on={done}
+        label={done ? 'Mark as to do' : 'Mark as done'}
+        onClick={(e) => {
+          e.stopPropagation()
+          onUpdate(task.id, { status: done ? 'todo' : 'done' })
+        }}
+      />
+      <div className="min-w-0 flex-1">
+        <p className={`break-words text-base font-semibold ${done ? 'text-mute line-through' : 'text-cream'}`}>{task.title}</p>
+        {bits.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs font-semibold">
+            {bits.map((b, i) => (
+              <span key={i} className={b.cls} style={b.style}>{b.t}</span>
+            ))}
+          </div>
+        )}
       </div>
-
-      {task.deadline && (
-        <p className={`mt-1.5 text-xs font-semibold ${overdue ? 'text-danger' : 'text-gold'}`}>
-          Due {fmtDeadline(task.deadline)}
-          {overdue && <span className="ml-2 rounded bg-danger/20 px-1.5 py-0.5 text-[10px] font-extrabold text-danger">Overdue</span>}
-        </p>
-      )}
-      {!task.deadline && overdue && <p className="mt-1 text-xs font-bold text-danger">Overdue</p>}
-
-      {task.notes && (
-        <p className="mt-2 whitespace-pre-wrap break-words rounded-xl border border-line/60 bg-ink/50 p-2.5 text-xs text-silver">
-          {task.notes}
-        </p>
-      )}
-    </div>
+      <span className={`shrink-0 text-[11px] font-bold ${PRI_TEXT[task.priority || 'medium']}`}>{pri.short}</span>
+    </li>
   )
+}
 
-  const subsBlock = (
-    <Subtasks parent={task} subs={subs} onUpdate={onUpdate} onRemove={onRemove} onAdd={onAddSubtask} />
-  )
+function TaskDetail({ task, subs, onBack, onUpdate, onRemove, onAddSub }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState('')
 
-  if (board) {
-    return (
-      <li
-        draggable
-        onDragStart={(e) => e.dataTransfer.setData('id', task.id)}
-        style={redBorder(task)}
-        className={`card cursor-grab p-3.5 transition active:cursor-grabbing ${cardBorder}`}
-      >
-        {info}
-        {subsBlock}
-        <div className="mt-3 grid grid-cols-3 gap-1.5">
-          {ORDER.map((s) => (
-            <button
-              key={s}
-              onClick={() => onUpdate(task.id, { status: s })}
-              aria-pressed={task.status === s}
-              className="min-h-[40px] rounded-lg border px-1 text-xs font-semibold transition"
-              style={
-                task.status === s
-                  ? { background: sc(s), borderColor: sc(s), color: '#061a10' }
-                  : { borderColor: '#1d5334', color: '#8da596' }
-              }
-            >
-              {LABEL[s]}
-            </button>
-          ))}
-        </div>
-        <div className="mt-2 flex justify-end">{actions}</div>
-      </li>
-    )
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && !editing && onBack()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onBack, editing])
+
+  const done = task.status === 'done'
+  const overdue = isOverdue(task) && !done
+  const pri = PRI[task.priority || 'medium']
+  const subDone = subs.filter((s) => s.status === 'done').length
+  const pct = subs.length ? Math.round((subDone / subs.length) * 100) : 0
+
+  const addSub = (e) => {
+    e.preventDefault()
+    const t = text.trim()
+    if (!t) return
+    onAddSub(task, t)
+    setText('')
   }
 
   return (
-    <li style={redBorder(task)} className={`card p-3.5 transition sm:p-4 ${cardBorder} ${done ? 'opacity-80' : ''}`}>
-      <div className="flex items-start gap-3">
-        <div className="pt-0.5">
-          <Check
-            on={done}
-            label={done ? 'Mark as to do' : 'Mark as done'}
-            onClick={() => onUpdate(task.id, { status: done ? 'todo' : 'done' })}
+    <section className="space-y-4">
+      <div>
+        <button type="button" className="btn-ghost" onClick={onBack}>Back</button>
+      </div>
+
+      <div className="card p-4 sm:p-5" style={redBorder(task)}>
+        {editing ? (
+          <TaskForm
+            period={task.task_date}
+            task={task}
+            onCancel={() => setEditing(false)}
+            onSave={(patch) => {
+              onUpdate(task.id, patch)
+              setEditing(false)
+            }}
           />
+        ) : (
+          <>
+            <div className="flex items-start gap-3">
+              <div className="pt-1">
+                <Check
+                  on={done}
+                  label={done ? 'Mark as to do' : 'Mark as done'}
+                  onClick={() => onUpdate(task.id, { status: done ? 'todo' : 'done' })}
+                />
+              </div>
+              <h2 className={`min-w-0 flex-1 break-words text-xl font-bold ${done ? 'text-mute line-through' : 'text-cream'}`}>
+                {task.title}
+              </h2>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2.5 text-xs">
+              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${pri.cls}`}>{pri.label}</span>
+              {task.task_date && (
+                <span className={overdue && !task.deadline ? 'text-danger' : 'text-silver'}>
+                  Scheduled {fmtShort(task.task_date)}
+                  {task.due_time ? `, ${fmtTime(task.due_time)}` : ''}
+                </span>
+              )}
+            </div>
+
+            {task.deadline && (
+              <p className={`mt-2 text-sm font-semibold ${overdue ? 'text-danger' : 'text-gold'}`}>
+                Due {fmtDeadline(task.deadline)}
+                {overdue ? '  (Overdue)' : ''}
+              </p>
+            )}
+            {!task.deadline && overdue && <p className="mt-2 text-sm font-bold text-danger">Overdue</p>}
+
+            {task.notes && (
+              <p className="mt-3 whitespace-pre-wrap break-words rounded-xl border border-line/60 bg-ink/50 p-2.5 text-sm text-silver">
+                {task.notes}
+              </p>
+            )}
+
+            <div className="mt-4 grid grid-cols-3 gap-1.5">
+              {ORDER.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => onUpdate(task.id, { status: s })}
+                  aria-pressed={task.status === s}
+                  className="min-h-[42px] rounded-lg border px-1 text-xs font-bold transition"
+                  style={
+                    task.status === s
+                      ? { background: sc(s), borderColor: sc(s), color: '#061a10' }
+                      : { borderColor: '#1d5334', color: '#8da596' }
+                  }
+                >
+                  {LABEL[s]}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-2 flex justify-end gap-1">
+              <button type="button" className="rounded-lg px-3 py-2 text-xs font-semibold text-silver hover:bg-raised" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-xs font-semibold text-danger hover:bg-raised"
+                onClick={() => {
+                  if (window.confirm('Delete this task and its sub-tasks?')) {
+                    onRemove(task.id)
+                    onBack()
+                  }
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="card p-4 sm:p-5">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-bold text-cream">Sub-tasks</h3>
+          <span className="text-xs font-extrabold text-accent">{subDone} of {subs.length}</span>
         </div>
-        <div className="min-w-0 flex-1">{info}</div>
-      </div>
+        {subs.length > 0 && <ProgressBar pct={pct} />}
+        {subs.length === 0 && <p className="mt-1 text-xs text-mute">No sub-tasks yet. Add the first one below.</p>}
 
-      <div className="pl-9">{subsBlock}</div>
+        <ul className="mt-2 divide-y divide-line/60">
+          {subs.map((s) => {
+            const sDone = s.status === 'done'
+            return (
+              <li key={s.id} className="flex items-center gap-3 py-3">
+                <Check
+                  size="h-5 w-5"
+                  on={sDone}
+                  label={sDone ? 'Mark sub-task as to do' : 'Mark sub-task as done'}
+                  onClick={() => onUpdate(s.id, { status: sDone ? 'todo' : 'done' })}
+                />
+                <span className={`min-w-0 flex-1 break-words text-[15px] ${sDone ? 'text-mute line-through' : 'text-cream'}`}>{s.title}</span>
+                <button type="button" onClick={() => onRemove(s.id)} className="shrink-0 px-2 py-1.5 text-xs text-mute hover:text-danger">
+                  Remove
+                </button>
+              </li>
+            )
+          })}
+        </ul>
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-9">
-        <button
-          title={`Change to ${LABEL[next]}`}
-          onClick={() => onUpdate(task.id, { status: next })}
-          className="min-h-[40px] rounded-full border px-4 text-xs font-bold transition sm:min-h-0 sm:py-1.5"
-          style={{ color: sc(task.status), borderColor: sc(task.status) }}
-        >
-          {LABEL[task.status]}
-        </button>
-        {actions}
+        <form onSubmit={addSub} className="mt-3 flex gap-2">
+          <input
+            className="field min-w-0 flex-1"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Add a sub-task"
+            aria-label="Add a sub-task"
+          />
+          <button type="submit" className="btn-secondary shrink-0">Add</button>
+        </form>
       </div>
-    </li>
+    </section>
   )
 }
 
@@ -983,112 +995,213 @@ function MonthlyReport({ tasks }) {
 }
 
 /* =========================================================================
-   8. READINGS
+   8. READINGS: subjects (cards) -> open one to add chapters with deadlines
    ========================================================================= */
-function Readings({ items, onAdd, onUpdate, onRemove }) {
+const chapterDue = (c) => (c.deadline ? new Date(c.deadline).getTime() : NONE)
+const chapterOverdue = (c) => Boolean(c.deadline) && c.status !== 'done' && isOverdue(c)
+
+function Readings({ items, subsOf, onAdd, onOpen }) {
   const [title, setTitle] = useState('')
-  const [notes, setNotes] = useState('')
-  const [filter, setFilter] = useState('all')
 
   const submit = (e) => {
     e.preventDefault()
     if (!title.trim()) return
-    onAdd({ type: 'reading', title: title.trim(), notes: notes.trim() || null, status: 'todo', task_date: today() })
+    onAdd({ type: 'reading', title: title.trim(), notes: null, status: 'todo', task_date: today() })
     setTitle('')
-    setNotes('')
   }
 
-  const doneCount = items.filter((i) => i.status === 'done').length
-  const totalCount = items.length
-  const percent = totalCount ? Math.round((doneCount / totalCount) * 100) : 0
-
-  const filtered = items
-    .filter((i) => (filter === 'todo' ? i.status !== 'done' : filter === 'done' ? i.status === 'done' : true))
-    .sort((a, b) => (a.status === 'done') - (b.status === 'done') || (b.created_at || '').localeCompare(a.created_at || ''))
+  const chapters = items.flatMap((r) => subsOf[r.id] || [])
+  const doneCount = chapters.filter((c) => c.status === 'done').length
+  const percent = chapters.length ? Math.round((doneCount / chapters.length) * 100) : 0
+  const sorted = items.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
 
   return (
     <section className="space-y-5">
       <div>
         <h2 className="text-xl font-bold text-cream sm:text-2xl">Readings and Study Checklist</h2>
-        <p className="text-xs text-mute">Track chapters, articles, and study materials</p>
+        <p className="text-xs text-mute">Add a subject, then open it to add chapters and deadlines</p>
       </div>
 
-      <form className="card space-y-3 p-4 sm:p-5" onSubmit={submit}>
+      <form className="card flex flex-col gap-2 p-4 sm:flex-row sm:p-5" onSubmit={submit}>
         <input
-          className="field !bg-ink text-base"
+          className="field !bg-ink min-w-0 flex-1 text-base"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Reading or chapter (e.g. Chapter 4)"
-          aria-label="Reading title"
-          required
+          placeholder="Subject (e.g. Biology)"
+          aria-label="Subject"
         />
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            className="field"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Subject, pages, or notes (optional)"
-            aria-label="Subject or note"
-          />
-          <button type="submit" className="btn-primary shrink-0 sm:px-6">Add reading</button>
-        </div>
+        <button type="submit" className="btn-primary shrink-0 sm:px-6">Add subject</button>
       </form>
 
       <div className="card p-4">
         <div className="mb-1.5 flex items-center justify-between text-xs font-semibold text-silver">
-          <span>Reading completion</span>
-          <span className="text-accent">{doneCount} of {totalCount} ({percent}%)</span>
+          <span>All chapters</span>
+          <span className="text-accent">{doneCount} of {chapters.length} ({percent}%)</span>
         </div>
         <ProgressBar pct={percent} />
       </div>
 
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-        {[['all', 'All'], ['todo', 'To read'], ['done', 'Completed']].map(([k, label]) => (
-          <button
-            key={k}
-            onClick={() => setFilter(k)}
-            className={`shrink-0 rounded-lg px-3 py-2 text-xs font-bold transition ${
-              filter === k ? 'border border-accent/40 bg-raised text-cream' : 'border border-transparent text-mute hover:text-cream'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {filtered.length === 0 ? (
+      {sorted.length === 0 ? (
         <div className="card p-10 text-center">
-          <p className="text-sm text-mute">No reading items here.</p>
+          <p className="text-sm text-mute">No subjects yet. Add one above.</p>
         </div>
       ) : (
-        <ul className="space-y-2">
-          {filtered.map((r) => {
-            const isDone = r.status === 'done'
+        <ul className="space-y-3">
+          {sorted.map((r) => {
+            const chs = subsOf[r.id] || []
+            const d = chs.filter((c) => c.status === 'done').length
+            const next = chs.filter((c) => c.status !== 'done').sort((a, b) => chapterDue(a) - chapterDue(b))[0]
+            const hint = !chs.length
+              ? 'Tap to add chapters'
+              : next
+              ? `Next: ${next.title}${next.deadline ? ` · Due ${fmtDeadline(next.deadline)}` : ''}`
+              : 'All chapters done'
+            const nextLate = next && chapterOverdue(next)
             return (
-              <li key={r.id} className={`card flex items-start gap-3 p-3.5 transition ${isDone ? 'opacity-70' : ''}`}>
-                <div className="pt-0.5">
-                  <Check
-                    on={isDone}
-                    label={isDone ? 'Mark as to read' : 'Mark as completed'}
-                    onClick={() => onUpdate(r.id, { status: isDone ? 'todo' : 'done' })}
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className={`break-words text-base font-semibold ${isDone ? 'text-mute line-through' : 'text-cream'}`}>{r.title}</p>
-                  {r.notes && <p className="mt-1 break-words text-xs text-mute">{r.notes}</p>}
-                </div>
+              <li key={r.id}>
                 <button
-                  aria-label="Delete reading"
-                  onClick={() => window.confirm('Delete this reading item?') && onRemove(r.id)}
-                  className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs text-mute hover:bg-raised hover:text-danger"
+                  type="button"
+                  onClick={() => onOpen(r.id)}
+                  className="card w-full p-4 text-left transition hover:border-accent"
                 >
-                  Delete
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 break-words text-lg font-bold text-cream">{r.title}</p>
+                    <span className="shrink-0 text-sm font-bold text-silver">{d}/{chs.length}</span>
+                  </div>
+                  {r.notes && <p className="mt-1 break-words text-sm text-silver">{r.notes}</p>}
+                  <div className="mt-3">
+                    <ProgressBar pct={chs.length ? Math.round((d / chs.length) * 100) : 0} />
+                  </div>
+                  <p className={`mt-3 text-sm ${nextLate ? 'font-semibold text-danger' : 'text-mute'}`}>{hint}</p>
                 </button>
               </li>
             )
           })}
         </ul>
       )}
+    </section>
+  )
+}
+
+function ReadingDetail({ subject, chapters, onBack, onUpdate, onRemove, onAddChapter }) {
+  const [editing, setEditing] = useState(false)
+  const [eTitle, setETitle] = useState(subject.title)
+  const [eNotes, setENotes] = useState(subject.notes || '')
+  const [text, setText] = useState('')
+  const [dlDate, setDlDate] = useState('')
+  const [dlTime, setDlTime] = useState('')
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && !editing && onBack()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onBack, editing])
+
+  const done = chapters.filter((c) => c.status === 'done').length
+  const pct = chapters.length ? Math.round((done / chapters.length) * 100) : 0
+  const list = chapters.slice().sort(doneLast((a, b) => chapterDue(a) - chapterDue(b)))
+
+  const save = (e) => {
+    e.preventDefault()
+    if (!eTitle.trim()) return
+    onUpdate(subject.id, { title: eTitle.trim(), notes: eNotes.trim() || null })
+    setEditing(false)
+  }
+
+  const addChapter = (e) => {
+    e.preventDefault()
+    const t = text.trim()
+    if (!t) return
+    onAddChapter(subject, t, dlDate ? joinDeadline(dlDate, dlTime) : null)
+    setText('')
+    setDlDate('')
+    setDlTime('')
+  }
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <button type="button" className="btn-ghost" onClick={onBack}>Back</button>
+      </div>
+
+      <div className="card p-4 sm:p-5">
+        {editing ? (
+          <form onSubmit={save} className="space-y-3">
+            <input className="field !bg-ink text-base font-semibold" value={eTitle} onChange={(e) => setETitle(e.target.value)} aria-label="Subject name" autoFocus />
+            <textarea className="field" rows={3} value={eNotes} onChange={(e) => setENotes(e.target.value)} placeholder="Description (optional)" aria-label="Description" />
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={() => { setEditing(false); setETitle(subject.title); setENotes(subject.notes || '') }}>Cancel</button>
+              <button type="submit" className="btn-primary">Save changes</button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <h2 className="break-words text-xl font-bold text-cream">{subject.title}</h2>
+            {subject.notes && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-silver">{subject.notes}</p>}
+            <div className="mt-2 flex justify-end gap-1">
+              <button type="button" className="rounded-lg px-3 py-2 text-xs font-semibold text-silver hover:bg-raised" onClick={() => setEditing(true)}>Edit</button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-xs font-semibold text-danger hover:bg-raised"
+                onClick={() => {
+                  if (window.confirm('Delete this subject and its chapters?')) {
+                    onRemove(subject.id)
+                    onBack()
+                  }
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="card p-4 sm:p-5">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-bold text-cream">Chapters</h3>
+          <span className="text-xs font-extrabold text-accent">{done} of {chapters.length}</span>
+        </div>
+        {chapters.length > 0 && <ProgressBar pct={pct} />}
+        {chapters.length === 0 && <p className="mt-1 text-xs text-mute">No chapters yet. Add the first one below.</p>}
+
+        <ul className="mt-2 divide-y divide-line/60">
+          {list.map((c) => {
+            const cDone = c.status === 'done'
+            const late = chapterOverdue(c)
+            return (
+              <li key={c.id} className="flex items-center gap-3 py-3">
+                <Check
+                  size="h-5 w-5"
+                  on={cDone}
+                  label={cDone ? 'Mark chapter as to read' : 'Mark chapter as done'}
+                  onClick={() => onUpdate(c.id, { status: cDone ? 'todo' : 'done' })}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className={`break-words text-[15px] ${cDone ? 'text-mute line-through' : 'text-cream'}`}>{c.title}</p>
+                  {c.deadline && (
+                    <p className={`text-xs font-semibold ${late ? 'text-danger' : 'text-gold'}`}>
+                      Due {fmtDeadline(c.deadline)}{late ? '  (Overdue)' : ''}
+                    </p>
+                  )}
+                </div>
+                <button type="button" onClick={() => onRemove(c.id)} className="shrink-0 px-2 py-1.5 text-xs text-mute hover:text-danger">Remove</button>
+              </li>
+            )
+          })}
+        </ul>
+
+        <form onSubmit={addChapter} className="mt-3 space-y-2">
+          <input className="field" value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a chapter" aria-label="Chapter name" />
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="field min-w-0 flex-1 sm:!w-auto sm:flex-none" type="date" value={dlDate} onChange={(e) => setDlDate(e.target.value)} aria-label="Chapter deadline date" />
+            <TimePicker value={dlTime} onChange={setDlTime} />
+            <span className="flex-1" />
+            <button type="submit" className="btn-secondary shrink-0">Add</button>
+          </div>
+          <p className="text-[11px] text-mute">Deadline is optional.</p>
+        </form>
+      </div>
     </section>
   )
 }
@@ -1299,6 +1412,43 @@ function Focus() {
 /* =========================================================================
    10. MAIN APP
    ========================================================================= */
+/* ---------- Offline-safe sync queue (same behavior as the mobile app) ---------- */
+const QUEUE_KEY = 'yana-sync-queue'
+
+const safeInsert = (row) => ({
+  id: row.id,
+  title: row.title,
+  status: row.status,
+  type: 'daily',
+  task_date: row.task_date || today(),
+  due_time: row.due_time || null,
+  deadline: row.deadline || null,
+  notes: packMetadata(row),
+})
+const safePatch = (m) => ({
+  title: m.title,
+  status: m.status,
+  task_date: m.task_date || today(),
+  due_time: m.due_time || null,
+  deadline: m.deadline || null,
+  notes: packMetadata(m),
+})
+
+async function runOp(op) {
+  let res
+  if (op.action === 'insert') {
+    res = await supabase.from('tasks').insert(op.row)
+    if (res.error?.code === '23505') return null // already saved
+    if (res.error) res = await supabase.from('tasks').insert(safeInsert(op.row))
+  } else if (op.action === 'update') {
+    res = await supabase.from('tasks').update(op.row).eq('id', op.id)
+    if (res.error) res = await supabase.from('tasks').update(safePatch(op.full)).eq('id', op.id)
+  } else {
+    res = await supabase.from('tasks').delete().eq('id', op.id)
+  }
+  return res.error
+}
+
 export default function App() {
   const [tasks, setTasks] = useState(() => {
     try {
@@ -1321,6 +1471,23 @@ export default function App() {
   const [q, setQ] = useState('')
   const [overdueOnly, setOverdueOnly] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [openId, setOpenId] = useState(null)
+
+  // Open a task or subject as its own page; the browser/phone back button closes it
+  const openItem = (id) => {
+    window.history.pushState({ yana: id }, '')
+    window.scrollTo(0, 0)
+    setOpenId(id)
+  }
+  const closeItem = () => {
+    if (window.history.state?.yana) window.history.back()
+    else setOpenId(null)
+  }
+  useEffect(() => {
+    const onPop = () => setOpenId(null)
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   useEffect(() => {
     try {
@@ -1328,24 +1495,63 @@ export default function App() {
     } catch {}
   }, [tasks])
 
+  const tasksRef = useRef(tasks)
+  tasksRef.current = tasks
+  const flushing = useRef(false)
+  const queue = useRef(null)
+  if (queue.current === null) {
+    try { queue.current = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]') } catch { queue.current = [] }
+  }
+  const saveQueue = () => {
+    try { localStorage.setItem(QUEUE_KEY, JSON.stringify(queue.current)) } catch {}
+  }
+
+  // Push pending changes to Supabase, oldest first
+  const flush = async () => {
+    if (!configured || flushing.current) return queue.current.length === 0
+    flushing.current = true
+    try {
+      while (queue.current.length) {
+        const op = queue.current[0]
+        let err
+        try { err = await runOp(op) } catch (e) { err = { message: String(e?.message || e) } }
+        if (err) {
+          if (err.code) {
+            // Supabase answered and said no (permissions, bad column...). Don't retry forever.
+            queue.current.shift()
+            setError(`Could not save a change: ${err.message}`)
+          } else break // no network, try again later
+        } else queue.current.shift()
+        saveQueue()
+      }
+    } finally {
+      flushing.current = false
+    }
+    saveQueue()
+    return queue.current.length === 0
+  }
+
   const load = async () => {
     if (!configured) return setLoading(false)
+    const clean = await flush()
+    if (!clean) return setLoading(false)
     try {
-      const { data, error } = await supabase.from('tasks').select('*').order('created_at')
-      if (error) {
-        if (navigator.onLine) setError('Could not sync with Supabase. Working with saved local data.')
-      } else if (data) {
+      const { data, error: err } = await supabase.from('tasks').select('*').order('created_at')
+      if (err) setError(`Could not load tasks: ${err.message}`)
+      else if (data) {
         setTasks(data.map(unpackMetadata))
         setError('')
       }
     } catch {
-      // offline fallback
+      // offline: keep cached data
     }
     setLoading(false)
   }
+  const loadRef = useRef(load)
+  loadRef.current = load
 
   useEffect(() => {
-    load()
+    loadRef.current()
 
     const channel = configured
       ? supabase
@@ -1362,97 +1568,71 @@ export default function App() {
 
     const handleOnline = () => {
       setOnline(true)
-      load()
+      loadRef.current()
     }
     const handleOffline = () => setOnline(false)
+    // Refetch whenever you come back to this tab, like the mobile app does on resume
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) loadRef.current()
+    }
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    window.addEventListener('focus', handleVisible)
+    document.addEventListener('visibilitychange', handleVisible)
 
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('focus', handleVisible)
+      document.removeEventListener('visibilitychange', handleVisible)
       if (channel) supabase.removeChannel(channel)
     }
   }, [])
 
-  const syncToSupabase = async (action, row, id) => {
-    if (!configured || !navigator.onLine) return
-
-    try {
-      if (action === 'insert') {
-        const { error: err1 } = await supabase.from('tasks').insert(row)
-        if (err1) {
-          const safePayload = {
-            id: row.id,
-            title: row.title,
-            status: row.status,
-            type: 'daily',
-            task_date: row.task_date || today(),
-            due_time: row.due_time || null,
-            deadline: row.deadline || null,
-            notes: packMetadata(row),
-          }
-          await supabase.from('tasks').insert(safePayload)
-        }
-      } else if (action === 'update') {
-        const { error: err1 } = await supabase.from('tasks').update(row).eq('id', id)
-        if (err1) {
-          const existing = tasks.find((x) => x.id === id) || {}
-          const merged = { ...existing, ...row }
-          const safePatch = {
-            title: merged.title,
-            status: merged.status,
-            task_date: merged.task_date || today(),
-            due_time: merged.due_time || null,
-            deadline: merged.deadline || null,
-            notes: packMetadata(merged),
-          }
-          await supabase.from('tasks').update(safePatch).eq('id', id)
-        }
-      } else if (action === 'delete') {
-        await supabase.from('tasks').delete().eq('id', id)
-      }
-    } catch {
-      // keep local data
-    }
+  const enqueue = (op) => {
+    if (!configured) return
+    queue.current.push(op)
+    saveQueue()
+    if (navigator.onLine) flush()
   }
 
   // Add task / reading / subtask. Returns the new row so sub-tasks can reference it.
-  const add = (row, quiet = false) => {
+  const add = (row) => {
     const id = crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
     const newRow = { ...row, id, priority: row.priority || 'medium', created_at: new Date().toISOString() }
     setTasks((prev) => [...prev, newRow])
-    if (!quiet) ding()
-    syncToSupabase('insert', newRow, id)
+    enqueue({ action: 'insert', id, row: newRow })
     return newRow
   }
 
   const update = (id, patch) => {
     if (patch.status === 'done') ding()
+    const existing = tasksRef.current.find((t) => t.id === id) || {}
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
-    syncToSupabase('update', patch, id)
+    enqueue({ action: 'update', id, row: patch, full: { ...existing, ...patch } })
   }
 
   const remove = (id) => {
-    const kids = tasks.filter((t) => t.parent_id === id)
+    const kids = tasksRef.current.filter((t) => t.parent_id === id)
     setTasks((prev) => prev.filter((t) => t.id !== id && t.parent_id !== id))
-    kids.forEach((k) => syncToSupabase('delete', null, k.id))
-    syncToSupabase('delete', null, id)
+    kids.forEach((k) => enqueue({ action: 'delete', id: k.id }))
+    enqueue({ action: 'delete', id })
   }
 
-  const addSubtask = (parent, title) =>
-    add(
-      {
-        type: 'subtask',
-        title,
-        status: 'todo',
-        parent_id: parent.id,
-        priority: parent.priority || 'medium',
-        task_date: parent.task_date || today(),
-      },
-      true,
-    )
+  const addSubtask = (parent, title, extra = {}) =>
+    add({
+      type: 'subtask',
+      title,
+      status: 'todo',
+      parent_id: parent.id,
+      priority: parent.priority || 'medium',
+      task_date: parent.task_date || today(),
+      ...extra,
+    })
+
+  // Chapters are sub-tasks of a reading subject, with an optional deadline
+  const addChapter = (parent, title, deadline) => addSubtask(parent, title, deadline ? { deadline } : {})
 
   // Planner shows daily tasks plus any older "project" items, so nothing saved before is lost.
   const dailyTasks = useMemo(
@@ -1466,9 +1646,18 @@ export default function App() {
     })
     return map
   }, [tasks])
-  const readingsList = useMemo(() => tasks.filter((t) => t.type === 'reading'), [tasks])
+  const readingsList = useMemo(() => tasks.filter((t) => t.type === 'reading' && !t.parent_id), [tasks])
+  const openObj = openId ? tasks.find((t) => t.id === openId) : null
 
-  const inDay = useMemo(() => dailyTasks.filter((t) => t.task_date === day), [dailyTasks, day])
+  const isToday = day === today()
+  // Unfinished overdue tasks keep showing on today's list until they're done
+  const isCarry = (t) => isToday && t.status !== 'done' && isOverdue(t)
+  // Tasks stay visible from their scheduled date through their due date
+  const inDay = useMemo(
+    () => dailyTasks.filter((t) => showsOn(t, day) || isCarry(t)),
+    [dailyTasks, day, isToday], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const [showPrev, setShowPrev] = useState(true)
   const searching = q.trim() !== ''
 
   const baseTasks = useMemo(() => {
@@ -1485,10 +1674,20 @@ export default function App() {
       .sort(SORTS[sort] || SORTS.soon)
   }, [dailyTasks, inDay, q, searching, overdueOnly, sort, subsOf])
 
+  // Unfinished tasks from earlier days pile up here when you look at today
+  const previous = useMemo(() => {
+    if (!isToday || searching) return []
+    return dailyTasks
+      .filter((t) => t.status !== 'done' && effDate(t) && effDate(t) < day && !showsOn(t, day))
+      .filter((t) => !isCarry(t))
+      .filter((t) => filter === 'all' || t.status === filter)
+      .sort(SORTS.soon)
+  }, [dailyTasks, isToday, searching, day, filter]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const counts = countBy(baseTasks)
   const shownTasks = filter === 'all' ? baseTasks : baseTasks.filter((t) => t.status === filter)
   const dayCounts = countBy(inDay)
-  const dayPct = inDay.length ? Math.round((dayCounts.done / inDay.length) * 100) : 0
+  const dayPct = inDay.length ? Math.round(((dayCounts.done || 0) / inDay.length) * 100) : 0
   const cols = filter === 'all' ? ORDER : [filter]
 
   const downloadReport = async () => {
@@ -1502,6 +1701,7 @@ export default function App() {
   }
 
   const goTab = (tabName) => {
+    setOpenId(null)
     setView(tabName)
     setFilter('all')
     setQ('')
@@ -1512,17 +1712,15 @@ export default function App() {
       on ? 'border-accent text-cream' : 'border-transparent text-mute hover:text-cream'
     }`
 
-  const renderItem = (t, board) => (
-    <TaskItem
+  const renderItem = (t, board, withDate = false) => (
+    <TaskRow
       key={t.id}
       task={t}
       subs={subsOf[t.id] || []}
-      period={day}
       board={board}
-      showDate={searching}
+      showDate={withDate || searching || (isOverdue(t) && t.status !== 'done')}
+      onOpen={() => openItem(t.id)}
       onUpdate={update}
-      onRemove={remove}
-      onAddSubtask={addSubtask}
     />
   )
 
@@ -1571,6 +1769,28 @@ export default function App() {
       )}
 
       <div className="min-w-0 flex-1">
+        {openObj ? (
+          openObj.type === 'reading' ? (
+            <ReadingDetail
+              subject={openObj}
+              chapters={subsOf[openObj.id] || []}
+              onBack={closeItem}
+              onUpdate={update}
+              onRemove={remove}
+              onAddChapter={addChapter}
+            />
+          ) : (
+            <TaskDetail
+              task={openObj}
+              subs={subsOf[openObj.id] || []}
+              onBack={closeItem}
+              onUpdate={update}
+              onRemove={remove}
+              onAddSub={addSubtask}
+            />
+          )
+        ) : (
+        <>
         {view === 'calendar' && (
           <CalendarView
             tasks={dailyTasks}
@@ -1584,7 +1804,7 @@ export default function App() {
 
         {view === 'report' && <MonthlyReport tasks={tasks} />}
 
-        {view === 'readings' && <Readings items={readingsList} onAdd={add} onUpdate={update} onRemove={remove} />}
+        {view === 'readings' && <Readings items={readingsList} subsOf={subsOf} onAdd={add} onOpen={openItem} />}
 
         {view === 'focus' && <Focus />}
 
@@ -1625,7 +1845,7 @@ export default function App() {
             <div className="card mb-4 mt-5 p-3.5">
               <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-semibold text-silver">
                 <span>Progress for this day</span>
-                <span className="text-accent">{dayCounts.done} of {inDay.length} ({dayPct}%)</span>
+                <span className="text-accent">{dayCounts.done || 0} of {inDay.length} ({dayPct}%)</span>
               </div>
               <ProgressBar pct={dayPct} />
             </div>
@@ -1690,12 +1910,26 @@ export default function App() {
                 >
                   {s !== 'all' && <Dot s={s} />}
                   {s === 'all' ? 'All' : LABEL[s]}
-                  <span className="text-[10px] text-mute">{s === 'all' ? baseTasks.length : counts[s]}</span>
+                  <span className="text-[10px] text-mute">{s === 'all' ? baseTasks.length : counts[s] || 0}</span>
                 </button>
               ))}
             </div>
 
             {searching && <p className="mb-3 text-xs text-mute">Searching across all daily tasks.</p>}
+
+            {previous.length > 0 && (
+              <div className="mb-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPrev((v) => !v)}
+                  className="mb-1 flex w-full items-center justify-between py-2 text-left"
+                >
+                  <span className="font-extrabold text-silver">Previous ({previous.length})</span>
+                  <span className="text-xs font-bold text-mute">{showPrev ? 'Hide' : 'Show'}</span>
+                </button>
+                {showPrev && <ul className="space-y-2.5">{previous.map((t) => renderItem(t, false, true))}</ul>}
+              </div>
+            )}
 
             {loading && !tasks.length ? (
               <p className="py-12 text-center text-xs text-mute">Loading your tasks...</p>
@@ -1707,7 +1941,12 @@ export default function App() {
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-2.5">{shownTasks.map((t) => renderItem(t, false))}</ul>
+                <div>
+                  <h3 className="mb-1 py-2 font-extrabold text-silver">
+                    {isToday ? 'Today' : fmtShort(day)} ({shownTasks.length})
+                  </h3>
+                  <ul className="space-y-2.5">{shownTasks.map((t) => renderItem(t, false))}</ul>
+                </div>
               )
             ) : (
               <div className={`grid gap-4 ${cols.length === 3 ? 'md:grid-cols-3' : 'grid-cols-1'}`}>
@@ -1736,6 +1975,8 @@ export default function App() {
               </div>
             )}
           </>
+        )}
+        </>
         )}
       </div>
 
